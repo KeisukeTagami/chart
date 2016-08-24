@@ -30,7 +30,7 @@ type alias Model =
     , yMin : Float
     , xTickCount : Int
     , yTickCount : Int
-    , dragStartAt : Maybe (Int, Int)
+    , dragStartAt : Maybe (Float, Float)
     }
 
 init : ( Model, Cmd Msg )
@@ -75,6 +75,14 @@ toD x y ps =
 
 toX model a = ( a - model.xMin ) / ( model.xMax - model.xMin) * ( toFloat ( model.width - ( fst model.margin ) * 2 ) )
 toY model a = ( 1.0 - ( a - model.yMin ) / ( model.yMax - model.yMin) ) * ( toFloat ( model.height - ( snd model.margin ) * 2 ) )
+
+fromX model a = a * ( model.xMax - model.xMin) / ( toFloat ( model.width - ( fst model.margin ) * 2 ) ) + model.xMin
+-- fromY model a = ( 1.0 - ( a / ( toFloat ( model.height - ( snd model.margin ) * 2 ) ) ) ) * ( model.yMax - model.yMin) +  model.yMin
+fromY model a =
+    let chartHeight = toFloat ( model.height - ( snd model.margin ) * 2 )
+        b = 1.0 - (a / chartHeight)
+        y = b * ( model.yMax - model.yMin ) + model.yMin
+    in y
 
 yAxis model = ( Svg.path [ toD (toX model) (toY model) [ M (0 , model.yMax)
                                                        , V model.yMin
@@ -145,60 +153,67 @@ view model =
                 "mousedown"
                 { stopPropagation = True, preventDefault = True }
                 ( Decode.object2 MouseDown
-                      ( "clientX" := Decode.int)
-                      ( "clientY" := Decode.int)
+                      ( "offsetX" := Decode.int)
+                      ( "offsetY" := Decode.int)
                 )
           , onWithOptions
                 "mouseup"
                 { stopPropagation = True, preventDefault = True }
                 ( Decode.object2 MouseUp
-                      ( "clientX" := Decode.int)
-                      ( "clientY" := Decode.int)
+                      ( "offsetX" := Decode.int)
+                      ( "offsetY" := Decode.int)
                 )
           , onWithOptions
                 "mousemove"
                 { stopPropagation = True, preventDefault = True }
                 ( Decode.object2 MouseMove
-                      ( "clientX" := Decode.int)
-                      ( "clientY" := Decode.int)
+                      ( "offsetX" := Decode.int)
+                      ( "offsetY" := Decode.int)
                 )
-          ] [
-           g [ transform <| translate model.margin
-             ]
-             ( List.concat [
-                      [ Svg.path [ toD (toX model) (toY model) <| [M (0,0)] ++ List.map (\ i -> L ( i, 100 * (sin (i / pi)) + 100 ) ) [0..400]
-                                 , Attr.style "stroke: rgb(31, 119, 180); fill: none;"
-                                 ]
-                          []
-                      ]
-                     , xAxis model
-                     , yAxis model
-                     ]
-             )
-          ]
+          ] [ g [ transform <| translate model.margin
+                , onWithOptions "mousedown" { stopPropagation = True, preventDefault = True } ( Decode.succeed NoOp)
+                , onWithOptions "mouseup" { stopPropagation = True, preventDefault = True } ( Decode.succeed NoOp)
+                , onWithOptions "mousemove" { stopPropagation = True, preventDefault = True } ( Decode.succeed NoOp)
+                  ]
+                    ( List.concat [
+                           [ Svg.path [ toD (toX model) (toY model) <| [M (0,0)] ++ List.map (\ i -> L ( i, 100 * (sin (i / pi)) + 100 ) ) [0..400]
+                                      , Attr.style "stroke: rgb(31, 119, 180); fill: none;"
+                                      ]
+                                 []
+                           ]
+                          , xAxis model
+                          , yAxis model
+                          ]
+                    )
+            ]
     ]
 
-type Msg = Increment | Decrement | Wheel Float | MouseDown Int Int | MouseUp Int Int | MouseMove Int Int
+type Msg = NoOp | Increment | Decrement | Wheel Float | MouseDown Int Int | MouseUp Int Int | MouseMove Int Int
 
 update msg model =
-  case msg of
-    Increment -> { model | yTickCount = model.yTickCount + 1
-                 , field = Utils.log <| model.field ++ "a" } ! []
-    Decrement -> { model | yTickCount = if model.yTickCount == 1
-                                        then 1
-                                        else model.yTickCount - 1
-                 , field = Utils.log <| model.field } ! []
-    Wheel dy -> { model | yMax = model.yMax * ( 1000 + dy ) / 1000
-                , yMin = model.yMin * ( 1000 + dy ) / 1000
-                , xMax = model.xMax * ( 1000 + dy ) / 1000
-                , xMin = model.xMin * ( 1000 + dy ) / 1000
-                } ! []
-    MouseDown x y -> { model | field = toString x ++ " down " ++ toString y
-                     , dragStartAt = Just (x, y)
+  let toScreenX x = fromX model <| toFloat ( x - fst model.margin )
+      toScreenY y = fromY model <| toFloat ( y - snd model.margin )
+  in case msg of
+         NoOp -> model ! []
+         Increment -> { model | yTickCount = model.yTickCount + 1
+                      , field = Utils.log <| model.field ++ "a" } ! []
+         Decrement -> { model | yTickCount = if model.yTickCount == 1
+                                             then 1
+                                             else model.yTickCount - 1
+                      , field = Utils.log <| model.field } ! []
+         Wheel dy -> { model | yMax = model.yMax * ( 1000 + dy ) / 1000
+                     , yMin = model.yMin * ( 1000 + dy ) / 1000
+                     , xMax = model.xMax * ( 1000 + dy ) / 1000
+                     , xMin = model.xMin * ( 1000 + dy ) / 1000
                      } ! []
-    MouseUp x y -> { model | field = toString x ++ " up " ++ toString y
-                   , dragStartAt = Nothing } ! []
-    -- MouseMove x y -> case model.dragStartAt of
-    --                      Just _ -> { model | field = toString x ++ " move " ++ toString y} ! []
-    --                      Nothing -> model ! []
-    MouseMove x y -> { model | field = toString x ++ " move " ++ toString y} ! []
+         MouseDown x y -> { model | field = toString ( toScreenX x  ) ++ " down " ++ toString ( toScreenY y  )
+                          , dragStartAt = Just (toScreenX x, toScreenY y)
+                          } ! []
+         MouseUp x y -> { model | field = toString ( toScreenX x  ) ++ " up " ++ toString ( toScreenY y  )
+                        , dragStartAt = Nothing } ! []
+         MouseMove x y -> { model | field = toString () ++
+                                " move " ++
+                                toString ( toScreenX x  ) ++
+                                " " ++
+                                toString ( toScreenY y  )
+                          } ! []
