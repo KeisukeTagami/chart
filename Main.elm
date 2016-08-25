@@ -46,9 +46,9 @@ emptyModel =
   , tickSize = 6
   , xMax = 600
   , xMin = -100
-  , yMax = 100
-  , yMin = -10
-  , base = (100, 0)
+  , yMax = 600
+  , yMin = -100
+  , base = (0, 0)
   , xTickCount = 5
   , yTickCount = 5
   , dragStartAt = Nothing
@@ -80,29 +80,31 @@ toX model a =
         xMax = model.xMax + fst model.base
         yMin = model.yMin + snd model.base
         yMax = model.yMax + snd model.base
-    in ( a - xMin ) / ( xMax - xMin) * ( toFloat ( model.width - ( fst model.margin ) * 2 ) )
+    in ( a - xMin ) / ( xMax - xMin) * ( chartWidth model )
 toY model a =
     let xMin = model.xMin + fst model.base
         xMax = model.xMax + fst model.base
         yMin = model.yMin + snd model.base
         yMax = model.yMax + snd model.base
-    in ( 1.0 - ( a - yMin ) / ( yMax - yMin) ) * ( toFloat ( model.height - ( snd model.margin ) * 2 ) )
+    in ( 1.0 - ( a - yMin ) / ( yMax - yMin) ) * ( chartHeight model )
 
 fromX model a =
     let xMin = model.xMin + fst model.base
         xMax = model.xMax + fst model.base
         yMin = model.yMin + snd model.base
         yMax = model.yMax + snd model.base
-    in a * ( xMax - xMin) / ( toFloat ( model.width - ( fst model.margin ) * 2 ) ) + xMin
+    in a * ( xMax - xMin) / ( chartWidth model ) + xMin
 fromY model a =
-    let chartHeight = toFloat ( model.height - ( snd model.margin ) * 2 )
-        b = 1.0 - (a / chartHeight)
+    let b = 1.0 - (a / chartHeight model )
         y = b * ( yMax - yMin ) + yMin
         xMin = model.xMin + fst model.base
         xMax = model.xMax + fst model.base
         yMin = model.yMin + snd model.base
         yMax = model.yMax + snd model.base
     in y
+
+chartWidth model = toFloat ( model.width - ( fst model.margin ) * 2 )
+chartHeight model = toFloat ( model.height - ( snd model.margin ) * 2 )
 
 yAxis model = ( Svg.path [ toD (toX model) (toY model) [ M (0 , model.yMax + snd model.base)
                                                        , V (model.yMin + snd model.base)
@@ -114,7 +116,7 @@ yAxis model = ( Svg.path [ toD (toX model) (toY model) [ M (0 , model.yMax + snd
                                    in g [ transform <| translate (0, toY model j)
                                         ]
                                    [ line [ stroke "#000"
-                                          , x1 <| toString <| toX model model.xMax + fst model.base
+                                          , x1 <| toString <| toX model ( model.xMax + fst model.base )
                                           , x2 <| toString <| -1 * model.tickSize
                                           , y1 "0"
                                           , y2 "0"
@@ -136,8 +138,8 @@ xAxis model = ( Svg.path [ toD (toX model) (toY model) [ M (model.xMin + fst mod
                          , Attr.style "stroke: rgb(31, 119, 180); fill: none;"
                          ] []
               ) :: ( List.map (\ i ->
-                                   let j = (model.xMax - model.xMin) * toFloat i / toFloat model.xTickCount + model.xMin
-                                   in g [ transform <| translate (toX model j, toY model model.yMin)
+                                   let j = (model.xMax - model.xMin) * toFloat i / toFloat model.xTickCount + model.xMin + fst model.base
+                                   in g [ transform <| translate (toX model j, toY model (model.yMin + snd model.base) )
                                         ]
                                    [ line [ stroke "#000"
                                           , x1 "0"
@@ -150,7 +152,7 @@ xAxis model = ( Svg.path [ toD (toX model) (toY model) [ M (model.xMin + fst mod
                                          t = text <| Formatting.print (Formatting.roundTo 2) j
                                      in text' [ x "0"
                                               , y "0"
-                                              , dx ("-" ++ ( toString <| (toFloat ( fst size) / 2) ) )
+                                              , dx ("-" ++ ( toString <| (toFloat (fst size) / 2) ) )
                                               , dy ( toString <| (toFloat <| snd size) + model.tickSize )
                                               ] [ t ]
                                    ]
@@ -211,8 +213,8 @@ view model =
 type Msg = NoOp | Increment | Decrement | Wheel Float | MouseDown Int Int | MouseUp Int Int | MouseMove Int Int
 
 update msg model =
-  let toScreenX x = fromX model <| toFloat ( x - fst model.margin )
-      toScreenY y = fromY model <| toFloat ( y - snd model.margin )
+  let toScreenX x = (toFloat x) * ( model.xMax - model.xMin) / chartWidth model
+      toScreenY y = (toFloat y) * ( model.yMax - model.yMin) / chartHeight model
   in case msg of
          NoOp -> model ! []
          Increment -> { model | yTickCount = model.yTickCount + 1
@@ -226,17 +228,16 @@ update msg model =
                      , xMax = model.xMax * ( 1000 + dy ) / 1000
                      , xMin = model.xMin * ( 1000 + dy ) / 1000
                      } ! []
-         MouseDown x y -> { model | field = toString ( toScreenX x  ) ++ " down " ++ toString ( toScreenY y  )
-                          , dragStartAt = Just ( (x, y), model.base)
+         MouseDown x y -> { model | dragStartAt = Just ( (x, y), model.base)
                           } ! []
-         MouseUp x y -> { model | field = toString ( toScreenX x  ) ++ " up " ++ toString ( toScreenY y  )
-                        , dragStartAt = Nothing } ! []
+         MouseUp x y -> { model | dragStartAt = Nothing
+                        } ! []
          MouseMove x y -> case model.dragStartAt of
-                              Just ((sx,sy), (i,j)) -> { model | field = toString () ++
+                              Just ((sx,sy), (i,j)) -> { model | field =
                                                              " move " ++
-                                                             toString ( x  ) ++
+                                                             toString ( x - sx  ) ++
                                                              " " ++
-                                                             toString ( y  )
-                                                       , base = ( toFloat (sx - x) + i, toFloat (y - sy) + j)
+                                                             toString ( y - sy )
+                                                       , base = ( i - toScreenX (x - sx), j + toScreenX (y - sy) )
                                                        } ! []
                               Nothing -> model ! []
